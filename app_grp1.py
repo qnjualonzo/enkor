@@ -1,5 +1,5 @@
 import streamlit as st
-from transformers import MarianMTModel, MarianTokenizer, BartForConditionalGeneration, BartTokenizer
+from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer, BartForConditionalGeneration, BartTokenizer
 import re
 
 # Initialize session state variables
@@ -12,17 +12,19 @@ if "lang_direction" not in st.session_state:
 if "input_text" not in st.session_state:
     st.session_state.input_text = ""
 
-# Load translation models and tokenizers
-translation_models = {
-    "EN to KO": {
-        "model": MarianMTModel.from_pretrained("Helsinki-NLP/opus-mt-en-ko"),
-        "tokenizer": MarianTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-ko")
-    },
-    "KO to EN": {
-        "model": MarianMTModel.from_pretrained("Helsinki-NLP/opus-mt-ko-en"),
-        "tokenizer": MarianTokenizer.from_pretrained("Helsinki-NLP/opus-mt-ko-en")
-    }
-}
+# Function to load translation model and tokenizer with fallback
+def load_translation_model(direction):
+    try:
+        model_name = "facebook/m2m100_418M"
+        model = M2M100ForConditionalGeneration.from_pretrained(model_name)
+        tokenizer = M2M100Tokenizer.from_pretrained(model_name)
+        return model, tokenizer
+    except Exception as e:
+        st.error(f"Error loading the translation model: {e}")
+        return None, None
+
+# Load translation model and tokenizer
+translation_model, translation_tokenizer = load_translation_model("translation")
 
 # Load summarization model and tokenizer
 summarization_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
@@ -35,11 +37,13 @@ def add_spaces_between_sentences(text):
 # Function to handle translation
 def translate_text(input_text, direction):
     try:
-        model = translation_models[direction]["model"]
-        tokenizer = translation_models[direction]["tokenizer"]
-        inputs = tokenizer(input_text, return_tensors="pt", max_length=512, truncation=True)
-        outputs = model.generate(**inputs)
-        return tokenizer.decode(outputs[0], skip_special_tokens=True)
+        if not translation_model or not translation_tokenizer:
+            return ""
+        source_lang, target_lang = ("en", "ko") if direction == "EN to KO" else ("ko", "en")
+        translation_tokenizer.src_lang = source_lang
+        inputs = translation_tokenizer(input_text, return_tensors="pt", max_length=512, truncation=True)
+        outputs = translation_model.generate(**inputs, forced_bos_token_id=translation_tokenizer.get_lang_id(target_lang))
+        return translation_tokenizer.decode(outputs[0], skip_special_tokens=True)
     except Exception as e:
         st.error(f"Error during translation: {e}")
         return ""
